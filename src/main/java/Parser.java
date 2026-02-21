@@ -143,27 +143,33 @@ public final class Parser {
      * Parses the {@code secondary-expression} rule.
      */
     public Ast.Expression parseSecondaryExpression() throws ParseException {
-        Ast.Expression receiver = parsePrimaryExpression();
+        Ast.Expression rcvr = parsePrimaryExpression();
 
-        while (peek(".")) {
-            tokens.advance();
-            if (!peek(Token.Type.IDENTIFIER)) {
-                throw new ParseException("Expected member name.", getErrorIndex());
-            }
-            String memberName = tokens.get(0).getLiteral();
+        while (match(".")) {
+            if (!peek(Token.Type.IDENTIFIER))
+                throw new ParseException("Expected member name after '.'", errIdx());
+
+            String mem = tokens.get(0).getLiteral();
             tokens.advance();
 
-            if (peek("(")) {
-                tokens.advance();
-                List<Ast.Expression> args = parseArgList();
-                requireToken(")");
-                receiver = new Ast.Expression.Function(Optional.of(receiver), memberName, args);
+            if (match("(")) {
+                List<Ast.Expression> args = new ArrayList<>();
+                if (peek(")")) {
+                    reqTok(")");
+                    rcvr = new Ast.Expression.Function(Optional.of(rcvr), mem, args);
+                    continue;
+                }
+                args.add(parseExpression());
+                while (match(","))
+                    args.add(parseExpression());
+                reqTok(")");
+                rcvr = new Ast.Expression.Function(Optional.of(rcvr), mem, args);
             } else {
-                receiver = new Ast.Expression.Access(Optional.of(receiver), memberName);
+                rcvr = new Ast.Expression.Access(Optional.of(rcvr), mem);
             }
         }
 
-        return receiver;
+        return rcvr;
     }
 
     /**
@@ -173,111 +179,110 @@ public final class Parser {
      * not strictly necessary.
      */
     public Ast.Expression parsePrimaryExpression() throws ParseException {
-        if (peek("NIL"))   { tokens.advance(); return new Ast.Expression.Literal(null); }
-        if (peek("TRUE"))  { tokens.advance(); return new Ast.Expression.Literal(Boolean.TRUE); }
-        if (peek("FALSE")) { tokens.advance(); return new Ast.Expression.Literal(Boolean.FALSE); }
+        if (match("NIL"))   return new Ast.Expression.Literal(null);
+        if (match("TRUE"))  return new Ast.Expression.Literal(Boolean.TRUE);
+        if (match("FALSE")) return new Ast.Expression.Literal(Boolean.FALSE);
 
         if (peek(Token.Type.INTEGER)) {
-            String raw = tokens.get(0).getLiteral();
+            BigInteger val = new BigInteger(tokens.get(0).getLiteral());
             tokens.advance();
-            return new Ast.Expression.Literal(new BigInteger(raw));
+            return new Ast.Expression.Literal(val);
         }
 
         if (peek(Token.Type.DECIMAL)) {
-            String raw = tokens.get(0).getLiteral();
+            BigDecimal val = new BigDecimal(tokens.get(0).getLiteral());
             tokens.advance();
-            return new Ast.Expression.Literal(new BigDecimal(raw));
+            return new Ast.Expression.Literal(val);
         }
 
         if (peek(Token.Type.CHARACTER)) {
-            String quoted = tokens.get(0).getLiteral();
+            String stripped = tokens.get(0).getLiteral();
             tokens.advance();
-            char ch = resolveEscapes(quoted.substring(1, quoted.length() - 1)).charAt(0);
-            return new Ast.Expression.Literal(ch);
+            stripped = stripped.substring(1, stripped.length() - 1);
+            StringBuilder sb = new StringBuilder();
+            int i = 0;
+            while (i < stripped.length()) {
+                if (stripped.charAt(i) == '\\') {
+                    char nx = stripped.charAt(i + 1);
+                    if      (nx == 'n')  sb.append('\n');
+                    else if (nx == 't')  sb.append('\t');
+                    else if (nx == 'r')  sb.append('\r');
+                    else if (nx == 'b')  sb.append('\b');
+                    else if (nx == '\'') sb.append('\'');
+                    else if (nx == '"')  sb.append('"');
+                    else if (nx == '\\') sb.append('\\');
+                    else { sb.append('\\'); sb.append(nx); }
+                    i += 2;
+                } else {
+                    sb.append(stripped.charAt(i));
+                    i++;
+                }
+            }
+            return new Ast.Expression.Literal(sb.toString().charAt(0));
         }
 
         if (peek(Token.Type.STRING)) {
-            String quoted = tokens.get(0).getLiteral();
+            String stripped = tokens.get(0).getLiteral();
             tokens.advance();
-            String content = resolveEscapes(quoted.substring(1, quoted.length() - 1));
-            return new Ast.Expression.Literal(content);
+            stripped = stripped.substring(1, stripped.length() - 1);
+            StringBuilder sb = new StringBuilder();
+            int i = 0;
+            while (i < stripped.length()) {
+                if (stripped.charAt(i) == '\\') {
+                    char nx = stripped.charAt(i + 1);
+                    if      (nx == 'n')  sb.append('\n');
+                    else if (nx == 't')  sb.append('\t');
+                    else if (nx == 'r')  sb.append('\r');
+                    else if (nx == 'b')  sb.append('\b');
+                    else if (nx == '\'') sb.append('\'');
+                    else if (nx == '"')  sb.append('"');
+                    else if (nx == '\\') sb.append('\\');
+                    else { sb.append('\\'); sb.append(nx); }
+                    i += 2;
+                } else {
+                    sb.append(stripped.charAt(i));
+                    i++;
+                }
+            }
+            return new Ast.Expression.Literal(sb.toString());
         }
 
-        if (peek("(")) {
-            tokens.advance();
+        if (match("(")) {
             Ast.Expression grouped = parseExpression();
-            requireToken(")");
+            reqTok(")");
             return new Ast.Expression.Group(grouped);
         }
 
         if (peek(Token.Type.IDENTIFIER)) {
-            String ident = tokens.get(0).getLiteral();
+            String name = tokens.get(0).getLiteral();
             tokens.advance();
-            if (peek("(")) {
-                tokens.advance();
-                List<Ast.Expression> args = parseArgList();
-                requireToken(")");
-                return new Ast.Expression.Function(Optional.empty(), ident, args);
-            }
-            return new Ast.Expression.Access(Optional.empty(), ident);
-        }
-
-        throw new ParseException("Expected an expression.", getErrorIndex());
-    }
-
-    // parses comma-separated expressions until ')'
-    private List<Ast.Expression> parseArgList() throws ParseException {
-        List<Ast.Expression> args = new ArrayList<>();
-        if (!peek(")")) {
-            args.add(parseExpression());
-            while (peek(",")) {
-                tokens.advance();
+            if (!match("("))
+                return new Ast.Expression.Access(Optional.empty(), name);
+            List<Ast.Expression> args = new ArrayList<>();
+            if (!peek(")")) {
                 args.add(parseExpression());
+                while (match(","))
+                    args.add(parseExpression());
             }
+            reqTok(")");
+            return new Ast.Expression.Function(Optional.empty(), name, args);
         }
-        return args;
+
+        throw new ParseException("Expected an expression.", errIdx());
     }
 
-    // replaces escape sequences in an unquoted string body
-    private String resolveEscapes(String raw) {
-        StringBuilder out = new StringBuilder(raw.length());
-        int pos = 0;
-        while (pos < raw.length()) {
-            char ch = raw.charAt(pos);
-            if (ch == '\\' && pos + 1 < raw.length()) {
-                char next = raw.charAt(pos + 1);
-                switch (next) {
-                    case 'b':  out.append('\b'); break;
-                    case 'n':  out.append('\n'); break;
-                    case 'r':  out.append('\r'); break;
-                    case 't':  out.append('\t'); break;
-                    case '\'': out.append('\''); break;
-                    case '"':  out.append('"');  break;
-                    case '\\': out.append('\\'); break;
-                    default:   out.append('\\'); out.append(next); break;
-                }
-                pos += 2;
-            } else {
-                out.append(ch);
-                pos++;
-            }
-        }
-        return out.toString();
-    }
-
-    // returns the index for error reporting — current token, or just past the last
-    private int getErrorIndex() {
-        if (tokens.has(0)) return tokens.get(0).getIndex();
+    // current token index for errors, or end of last token if stream is done
+    private int errIdx() {
+        if (tokens.has(0))
+            return tokens.get(0).getIndex();
         Token last = tokens.get(-1);
         return last.getIndex() + last.getLiteral().length();
     }
 
-    // requires the current token to match expected literal, then advances
-    private void requireToken(String expected) throws ParseException {
-        if (!peek(expected)) {
-            throw new ParseException("Expected '" + expected + "'.", getErrorIndex());
-        }
-        tokens.advance();
+    // consumes expected token or throws
+    private void reqTok(String expected) throws ParseException {
+        if (!match(expected))
+            throw new ParseException("Expected '" + expected + "'.", errIdx());
     }
 
     /**
@@ -291,16 +296,16 @@ public final class Parser {
      * {@code peek(Token.Type.IDENTIFIER)} and {@code peek("literal")}.
      */
     private boolean peek(Object... patterns) {
-        for (int offset = 0; offset < patterns.length; offset++) {
-            if (!tokens.has(offset)) return false;
-            Token candidate = tokens.get(offset);
-            Object pattern = patterns[offset];
-            if (pattern instanceof Token.Type) {
-                if (candidate.getType() != pattern) return false;
-            } else if (pattern instanceof String) {
-                if (!candidate.getLiteral().equals(pattern)) return false;
+        for (int i = 0; i < patterns.length; i++) {
+            if (!tokens.has(i)) return false;
+            Token t = tokens.get(i);
+            Object p = patterns[i];
+            if (p instanceof Token.Type) {
+                if (t.getType() != p) return false;
+            } else if (p instanceof String) {
+                if (!t.getLiteral().equals(p)) return false;
             } else {
-                throw new AssertionError("Unsupported pattern type: " + pattern.getClass());
+                throw new AssertionError("Unsupported pattern type: " + p.getClass());
             }
         }
         return true;
