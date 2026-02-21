@@ -31,7 +31,19 @@ public final class Parser {
      * Parses the {@code source} rule.
      */
     public Ast.Source parseSource() throws ParseException {
-        throw new UnsupportedOperationException(); //TODO
+        List<Ast.Field> fields = new ArrayList<>();
+        List<Ast.Method> methods = new ArrayList<>();
+
+        while (tokens.has(0)) {
+            if (peek("LET"))
+                fields.add(parseField());
+            else if (peek("DEF"))
+                methods.add(parseMethod());
+            else
+                throw new ParseException("Expected LET or DEF.", errIdx());
+        }
+
+        return new Ast.Source(fields, methods);
     }
 
     /**
@@ -39,7 +51,20 @@ public final class Parser {
      * next tokens start a field, aka {@code LET}.
      */
     public Ast.Field parseField() throws ParseException {
-        throw new UnsupportedOperationException(); //TODO
+        match("LET");
+        boolean isConst = match("CONST");
+
+        if (!peek(Token.Type.IDENTIFIER))
+            throw new ParseException("Expected field name.", errIdx());
+        String name = tokens.get(0).getLiteral();
+        tokens.advance();
+
+        Optional<Ast.Expression> val = Optional.empty();
+        if (match("="))
+            val = Optional.of(parseExpression());
+
+        reqTok(";");
+        return new Ast.Field(name, isConst, val);
     }
 
     /**
@@ -47,7 +72,34 @@ public final class Parser {
      * next tokens start a method, aka {@code DEF}.
      */
     public Ast.Method parseMethod() throws ParseException {
-        throw new UnsupportedOperationException(); //TODO
+        match("DEF");
+
+        if (!peek(Token.Type.IDENTIFIER))
+            throw new ParseException("Expected method name.", errIdx());
+        String name = tokens.get(0).getLiteral();
+        tokens.advance();
+
+        reqTok("(");
+        List<String> params = new ArrayList<>();
+        if (peek(Token.Type.IDENTIFIER)) {
+            params.add(tokens.get(0).getLiteral());
+            tokens.advance();
+            while (match(",")) {
+                if (!peek(Token.Type.IDENTIFIER))
+                    throw new ParseException("Expected parameter name.", errIdx());
+                params.add(tokens.get(0).getLiteral());
+                tokens.advance();
+            }
+        }
+        reqTok(")");
+        reqTok("DO");
+
+        List<Ast.Statement> body = new ArrayList<>();
+        while (tokens.has(0) && !peek("END"))
+            body.add(parseStatement());
+
+        reqTok("END");
+        return new Ast.Method(name, params, body);
     }
 
     /**
