@@ -184,8 +184,8 @@ public final class Parser {
             tokens.advance();
             tokens.advance(); // consume '='
             init = new Ast.Statement.Assignment(
-                new Ast.Expression.Access(Optional.empty(), varName),
-                parseExpression()
+                    new Ast.Expression.Access(Optional.empty(), varName),
+                    parseExpression()
             );
         }
         reqTok(";");
@@ -199,8 +199,8 @@ public final class Parser {
             tokens.advance();
             tokens.advance(); // consume '='
             step = new Ast.Statement.Assignment(
-                new Ast.Expression.Access(Optional.empty(), varName),
-                parseExpression()
+                    new Ast.Expression.Access(Optional.empty(), varName),
+                    parseExpression()
             );
         }
         reqTok(")");
@@ -440,6 +440,8 @@ public final class Parser {
     private int errIdx() {
         if (tokens.has(0))
             return tokens.get(0).getIndex();
+        if (!tokens.has(-1))
+            return 0;
         Token last = tokens.get(-1);
         return last.getIndex() + last.getLiteral().length();
     }
